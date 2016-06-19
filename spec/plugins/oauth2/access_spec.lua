@@ -14,14 +14,14 @@ local STUB_GET_URL = spec_helper.STUB_GET_URL
 local STUB_POST_URL = spec_helper.STUB_POST_URL
 
 local function provision_code()
-  local response = http_client.post(PROXY_SSL_URL.."/oauth2/authorize", { provision_key = "provision123", authenticated_userid = "id123", client_id = "clientid123", scope = "email", response_type = "code", state = "hello", authenticated_userid = "userid123" }, {host = "oauth2.com"})
+  local response = http_client.post(PROXY_SSL_URL.."/oauth2/authorize", { provision_key = "provision123", client_id = "clientid123", scope = "email", response_type = "code", state = "hello", authenticated_userid = "userid123" }, {host = "oauth2.com"})
   local body = cjson.decode(response)
   local matches = rex.gmatch(body.redirect_uri, "^http://google\\.com/kong\\?code=([\\w]{32,32})&state=hello$")
   local code
   for line in matches do
     code = line
   end
-  local data = dao_factory.oauth2_authorization_codes:find_by_keys({code = code})
+  local data = dao_factory.oauth2_authorization_codes:find_all {code = code}
   return data[1].code
 end
 
@@ -57,7 +57,8 @@ describe("Authentication Plugin", function()
         { name = "oauth2", config = { scopes = { "email", "profile", "user.email" }, mandatory_scope = true, provision_key = "provision123", token_expiration = 5, enable_implicit_grant = true, accept_http_if_already_terminated = true }, __api = 6 },
       },
       oauth2_credential = {
-        { client_id = "clientid123", client_secret = "secret123", redirect_uri = "http://google.com/kong", name="testapp", __consumer = 1 }
+        { client_id = "clientid123", client_secret = "secret123", redirect_uri = {"http://google.com/kong"}, name="testapp", __consumer = 1 },
+        { client_id = "clientid789", client_secret = "secret789", redirect_uri = {"http://google.com/kong?foo=bar&code=123"}, name="testapp3", __consumer = 1 }
       }
     }
     spec_helper.start_kong()
@@ -98,8 +99,8 @@ describe("Authentication Plugin", function()
         local body = cjson.decode(response)
         assert.are.equal(400, status)
         assert.are.equal(2, utils.table_size(body))
-        assert.are.equal("invalid_request", body.error)
-        assert.are.equal("Invalid client_id", body.error_description)
+        assert.are.equal("invalid_client", body.error)
+        assert.are.equal("Invalid client authentication", body.error_description)
 
         -- Checking headers
         assert.are.equal("no-store", headers["cache-control"])
@@ -135,7 +136,7 @@ describe("Authentication Plugin", function()
         local body = cjson.decode(response)
         assert.are.equal(400, status)
         assert.are.equal(1, utils.table_size(body))
-        assert.are.equal("http://google.com/kong?error=unsupported_response_type&state=somestate&error_description=Invalid%20response_type", body.redirect_uri)
+        assert.are.equal("http://google.com/kong?error=unsupported_response_type&error_description=Invalid%20response_type&state=somestate", body.redirect_uri)
       end)
 
       it("should return error when the redirect_uri does not match", function()
@@ -143,7 +144,15 @@ describe("Authentication Plugin", function()
         local body = cjson.decode(response)
         assert.are.equal(400, status)
         assert.are.equal(1, utils.table_size(body))
-        assert.are.equal("http://google.com/kong?error=invalid_request&error_description=Invalid%20redirect_uri%20that%20does%20not%20match%20with%20the%20one%20created%20with%20the%20application", body.redirect_uri)
+        assert.are.equal("http://google.com/kong?error=invalid_request&error_description=Invalid%20redirect_uri%20that%20does%20not%20match%20with%20any%20redirect_uri%20created%20with%20the%20application", body.redirect_uri)
+      end)
+
+      it("should work even if redirect_uri contains a query string", function()
+        local response, status = http_client.post(PROXY_URL.."/oauth2/authorize", { provision_key = "provision123", authenticated_userid = "id123", client_id = "clientid789", scope = "email", response_type = "code" }, {host = "oauth2_6.com", ["X-Forwarded-Proto"] = "https"})
+        local body = cjson.decode(response)
+        assert.are.equal(200, status)
+        assert.are.equal(1, utils.table_size(body))
+        assert.truthy(rex.match(body.redirect_uri, "^http://google\\.com/kong\\?code=[\\w]{32,32}&foo=bar$"))
       end)
 
       it("should fail when not under HTTPS", function()
@@ -218,7 +227,7 @@ describe("Authentication Plugin", function()
       end)
 
       it("should return success and store authenticated user properties", function()
-        local response, status = http_client.post(PROXY_SSL_URL.."/oauth2/authorize", { provision_key = "provision123", authenticated_userid = "id123", client_id = "clientid123", scope = "email", response_type = "code", state = "hello", authenticated_userid = "userid123" }, {host = "oauth2.com"})
+        local response, status = http_client.post(PROXY_SSL_URL.."/oauth2/authorize", { provision_key = "provision123", client_id = "clientid123", scope = "email", response_type = "code", state = "hello", authenticated_userid = "userid123" }, {host = "oauth2.com"})
         local body = cjson.decode(response)
         assert.are.equal(200, status)
         assert.are.equal(1, utils.table_size(body))
@@ -229,7 +238,7 @@ describe("Authentication Plugin", function()
         for line in matches do
           code = line
         end
-        local data = dao_factory.oauth2_authorization_codes:find_by_keys({code = code})
+        local data = dao_factory.oauth2_authorization_codes:find_all {code = code}
         assert.are.equal(1, #data)
         assert.are.equal(code, data[1].code)
 
@@ -238,7 +247,7 @@ describe("Authentication Plugin", function()
       end)
 
       it("should return success with a dotted scope and store authenticated user properties", function()
-        local response, status = http_client.post(PROXY_SSL_URL.."/oauth2/authorize", { provision_key = "provision123", authenticated_userid = "id123", client_id = "clientid123", scope = "user.email", response_type = "code", state = "hello", authenticated_userid = "userid123" }, {host = "oauth2.com"})
+        local response, status = http_client.post(PROXY_SSL_URL.."/oauth2/authorize", { provision_key = "provision123", client_id = "clientid123", scope = "user.email", response_type = "code", state = "hello", authenticated_userid = "userid123" }, {host = "oauth2.com"})
         local body = cjson.decode(response)
         assert.are.equal(200, status)
         assert.are.equal(1, utils.table_size(body))
@@ -249,7 +258,7 @@ describe("Authentication Plugin", function()
         for line in matches do
           code = line
         end
-        local data = dao_factory.oauth2_authorization_codes:find_by_keys({code = code})
+        local data = dao_factory.oauth2_authorization_codes:find_all {code = code}
         assert.are.equal(1, #data)
         assert.are.equal(code, data[1].code)
 
@@ -266,33 +275,53 @@ describe("Authentication Plugin", function()
         local body = cjson.decode(response)
         assert.are.equal(200, status)
         assert.are.equal(1, utils.table_size(body))
-        assert.truthy(rex.match(body.redirect_uri, "^http://google\\.com/kong\\?token_type=bearer&access_token=[\\w]{32,32}$"))
+        assert.truthy(rex.match(body.redirect_uri, "^http://google\\.com/kong\\?access_token=[\\w]{32,32}&expires_in=[\\d]+&token_type=bearer$"))
 
         -- Checking headers
         assert.are.equal("no-store", headers["cache-control"])
         assert.are.equal("no-cache", headers["pragma"])
       end)
+
       it("should return success and the state", function()
         local response, status = http_client.post(PROXY_SSL_URL.."/oauth2/authorize", { provision_key = "provision123", authenticated_userid = "id123", client_id = "clientid123", scope = "email", response_type = "token", state = "wot" }, {host = "oauth2.com"})
         local body = cjson.decode(response)
         assert.are.equal(200, status)
         assert.are.equal(1, utils.table_size(body))
-        assert.truthy(rex.match(body.redirect_uri, "^http://google\\.com/kong\\?token_type=bearer&state=wot&access_token=[\\w]{32,32}$"))
+        assert.truthy(rex.match(body.redirect_uri, "^http://google\\.com/kong\\?access_token=[\\w]{32,32}&expires_in=[\\d]+&state=wot&token_type=bearer$"))
       end)
 
-      it("should return success and store authenticated user properties", function()
-        local response, status = http_client.post(PROXY_SSL_URL.."/oauth2/authorize", { provision_key = "provision123", authenticated_userid = "id123", client_id = "clientid123", scope = "email  profile", response_type = "token", authenticated_userid = "userid123" }, {host = "oauth2.com"})
+      it("should return success and the token should have the right expiration", function()
+        local response, status = http_client.post(PROXY_SSL_URL.."/oauth2/authorize", { provision_key = "provision123", authenticated_userid = "id123", client_id = "clientid123", scope = "email", response_type = "token" }, {host = "oauth2.com"})
         local body = cjson.decode(response)
         assert.are.equal(200, status)
         assert.are.equal(1, utils.table_size(body))
-        assert.truthy(rex.match(body.redirect_uri, "^http://google\\.com/kong\\?token_type=bearer&access_token=[\\w]{32,32}$"))
+        assert.truthy(rex.match(body.redirect_uri, "^http://google\\.com/kong\\?access_token=[\\w]{32,32}&expires_in=[\\d]+&token_type=bearer$"))
 
-        local matches = rex.gmatch(body.redirect_uri, "^http://google\\.com/kong\\?token_type=bearer&access_token=([\\w]{32,32})$")
+        local matches = rex.gmatch(body.redirect_uri, "^http://google\\.com/kong\\?access_token=([\\w]{32,32})&expires_in=[\\d]+&token_type=bearer$")
         local access_token
         for line in matches do
           access_token = line
         end
-        local data = dao_factory.oauth2_tokens:find_by_keys({access_token = access_token})
+        local data = dao_factory.oauth2_tokens:find_all {access_token = access_token}
+        assert.are.equal(1, #data)
+        assert.are.equal(access_token, data[1].access_token)
+        assert.are.equal(5, data[1].expires_in)
+        assert.falsy(data[1].refresh_token)
+      end)
+
+      it("should return success and store authenticated user properties", function()
+        local response, status = http_client.post(PROXY_SSL_URL.."/oauth2/authorize", { provision_key = "provision123", client_id = "clientid123", scope = "email  profile", response_type = "token", authenticated_userid = "userid123" }, {host = "oauth2.com"})
+        local body = cjson.decode(response)
+        assert.are.equal(200, status)
+        assert.are.equal(1, utils.table_size(body))
+        assert.truthy(rex.match(body.redirect_uri, "^http://google\\.com/kong\\?access_token=[\\w]{32,32}&expires_in=[\\d]+&token_type=bearer$"))
+
+        local matches = rex.gmatch(body.redirect_uri, "^http://google\\.com/kong\\?access_token=([\\w]{32,32})&expires_in=[\\d]+&token_type=bearer$")
+        local access_token
+        for line in matches do
+          access_token = line
+        end
+        local data = dao_factory.oauth2_tokens:find_all {access_token = access_token}
         assert.are.equal(1, #data)
         assert.are.equal(access_token, data[1].access_token)
 
@@ -300,15 +329,15 @@ describe("Authentication Plugin", function()
         assert.are.equal("email profile", data[1].scope)
 
         -- Checking that there is no refresh token since it's an implicit grant
-        assert.are.equal(0, data[1].expires_in)
+        assert.are.equal(5, data[1].expires_in)
         assert.falsy(data[1].refresh_token)
       end)
 
       it("should return set the right upstream headers", function()
-        local response = http_client.post(PROXY_SSL_URL.."/oauth2/authorize", { provision_key = "provision123", authenticated_userid = "id123", client_id = "clientid123", scope = "email  profile", response_type = "token", authenticated_userid = "userid123" }, {host = "oauth2.com"})
+        local response = http_client.post(PROXY_SSL_URL.."/oauth2/authorize", { provision_key = "provision123", client_id = "clientid123", scope = "email  profile", response_type = "token", authenticated_userid = "userid123" }, {host = "oauth2.com"})
         local body = cjson.decode(response)
 
-        local matches = rex.gmatch(body.redirect_uri, "^http://google\\.com/kong\\?token_type=bearer&access_token=([\\w]{32,32})$")
+        local matches = rex.gmatch(body.redirect_uri, "^http://google\\.com/kong\\?access_token=([\\w]{32,32})&expires_in=[\\d]+&token_type=bearer$")
         local access_token
         for line in matches do
           access_token = line
@@ -333,8 +362,8 @@ describe("Authentication Plugin", function()
         local body = cjson.decode(response)
         assert.are.equal(400, status)
         assert.are.equal(2, utils.table_size(body))
-        assert.are.equal("invalid_request", body.error)
-        assert.are.equal("Invalid client_secret", body.error_description)
+        assert.are.equal("invalid_client", body.error)
+        assert.are.equal("Invalid client authentication", body.error_description)
       end)
 
       it("should return an error when client_secret is not sent", function()
@@ -342,7 +371,7 @@ describe("Authentication Plugin", function()
         local body = cjson.decode(response)
         assert.are.equal(400, status)
         assert.are.equal(2, utils.table_size(body))
-        assert.are.equal("invalid_request", body.error)
+        assert.are.equal("unsupported_grant_type", body.error)
         assert.are.equal("Invalid grant_type", body.error_description)
       end)
 
@@ -407,12 +436,13 @@ describe("Authentication Plugin", function()
       end)
 
       it("should return an error with a wrong authorization header", function()
-        local response, status = http_client.post(PROXY_SSL_URL.."/oauth2/token", { scope = "email", grant_type = "client_credentials" }, {host = "oauth2_4.com", authorization = "Basic Y2xpZW50aWQxMjM6c2VjcmV0MTI0"})
+        local response, status, headers = http_client.post(PROXY_SSL_URL.."/oauth2/token", { scope = "email", grant_type = "client_credentials" }, {host = "oauth2_4.com", authorization = "Basic Y2xpZW50aWQxMjM6c2VjcmV0MTI0"})
         local body = cjson.decode(response)
-        assert.are.equal(400, status)
+        assert.are.equal(401, status)
         assert.are.equal(2, utils.table_size(body))
-        assert.are.equal("invalid_request", body.error)
-        assert.are.equal("Invalid client_secret", body.error_description)
+        assert.are.equal("invalid_client", body.error)
+        assert.are.equal("Invalid client authentication", body.error_description)
+        assert.are.equal("Basic realm=\"OAuth2.0\"", headers["www-authenticate"])
       end)
 
       it("should return set the right upstream headers", function()
@@ -429,17 +459,33 @@ describe("Authentication Plugin", function()
         assert.are.equal("hello", body.headers["x-authenticated-userid"])
       end)
 
+      it("should work in a multipart request", function()
+        local response, status = http_client.post_multipart(PROXY_SSL_URL.."/oauth2/token", { client_id = "clientid123", client_secret="secret123", scope = "email", grant_type = "client_credentials", authenticated_userid = "hello", provision_key = "provision123" }, {host = "oauth2_4.com"})
+        assert.are.equal(200, status)
+
+        local _, status = http_client.post_multipart(PROXY_SSL_URL.."/request", { access_token = cjson.decode(response).access_token }, {host = "oauth2_4.com"})
+        assert.are.equal(200, status)
+      end)
+
     end)
 
     describe("Password Grant", function()
+
+      it("should block unauthorized requests", function()
+        local response, status = http_client.get(PROXY_SSL_URL.."/request", {}, {host = "oauth2_5.com"})
+        local body = cjson.decode(response)
+        assert.are.equal(401, status)
+        assert.are.equal("invalid_request", body.error)
+        assert.are.equal("The access token is missing", body.error_description)
+      end)
 
       it("should return an error when client_secret is not sent", function()
         local response, status = http_client.post(PROXY_SSL_URL.."/oauth2/token", { client_id = "clientid123", scope = "email", response_type = "token" }, {host = "oauth2_5.com"})
         local body = cjson.decode(response)
         assert.are.equal(400, status)
         assert.are.equal(2, utils.table_size(body))
-        assert.are.equal("invalid_request", body.error)
-        assert.are.equal("Invalid client_secret", body.error_description)
+        assert.are.equal("invalid_client", body.error)
+        assert.are.equal("Invalid client authentication", body.error_description)
       end)
 
       it("should return an error when client_secret is not sent", function()
@@ -447,7 +493,7 @@ describe("Authentication Plugin", function()
         local body = cjson.decode(response)
         assert.are.equal(400, status)
         assert.are.equal(2, utils.table_size(body))
-        assert.are.equal("invalid_request", body.error)
+        assert.are.equal("unsupported_grant_type", body.error)
         assert.are.equal("Invalid grant_type", body.error_description)
       end)
 
@@ -501,12 +547,13 @@ describe("Authentication Plugin", function()
       end)
 
       it("should return an error with a wrong authorization header", function()
-        local response, status = http_client.post(PROXY_SSL_URL.."/oauth2/token", { provision_key = "provision123", authenticated_userid = "id123", scope = "email", grant_type = "password" }, {host = "oauth2_5.com", authorization = "Basic Y2xpZW50aWQxMjM6c2VjcmV0MTI0"})
+        local response, status, headers = http_client.post(PROXY_SSL_URL.."/oauth2/token", { provision_key = "provision123", authenticated_userid = "id123", scope = "email", grant_type = "password" }, {host = "oauth2_5.com", authorization = "Basic Y2xpZW50aWQxMjM6c2VjcmV0MTI0"})
         local body = cjson.decode(response)
-        assert.are.equal(400, status)
+        assert.are.equal(401, status)
         assert.are.equal(2, utils.table_size(body))
-        assert.are.equal("invalid_request", body.error)
-        assert.are.equal("Invalid client_secret", body.error_description)
+        assert.are.equal("invalid_client", body.error)
+        assert.are.equal("Invalid client authentication", body.error_description)
+        assert.are.equal("Basic realm=\"OAuth2.0\"", headers["www-authenticate"])
       end)
 
       it("should return set the right upstream headers", function()
@@ -534,8 +581,8 @@ describe("Authentication Plugin", function()
       local body = cjson.decode(response)
       assert.are.equal(400, status)
       assert.are.equal(2, utils.table_size(body))
-      assert.are.equal("invalid_request", body.error)
-      assert.are.equal("Invalid client_id", body.error_description)
+      assert.are.equal("invalid_client", body.error)
+      assert.are.equal("Invalid client authentication", body.error_description)
 
       -- Checking headers
       assert.are.equal("no-store", headers["cache-control"])
@@ -549,8 +596,8 @@ describe("Authentication Plugin", function()
       local body = cjson.decode(response)
       assert.are.equal(400, status)
       assert.are.equal(2, utils.table_size(body))
-      assert.are.equal("invalid_request", body.error)
-      assert.are.equal("Invalid client_id", body.error_description)
+      assert.are.equal("invalid_client", body.error)
+      assert.are.equal("Invalid client authentication", body.error_description)
 
       -- Checking headers
       assert.are.equal("no-store", headers["cache-control"])
@@ -564,8 +611,8 @@ describe("Authentication Plugin", function()
       local body = cjson.decode(response)
       assert.are.equal(400, status)
       assert.are.equal(2, utils.table_size(body))
-      assert.are.equal("invalid_request", body.error)
-      assert.are.equal("Invalid client_id", body.error_description)
+      assert.are.equal("invalid_client", body.error)
+      assert.are.equal("Invalid client authentication", body.error_description)
 
       -- Checking headers
       assert.are.equal("no-store", headers["cache-control"])
@@ -579,7 +626,7 @@ describe("Authentication Plugin", function()
       local body = cjson.decode(response)
       assert.are.equal(400, status)
       assert.are.equal(2, utils.table_size(body))
-      assert.are.equal("invalid_request", body.error)
+      assert.are.equal("unsupported_grant_type", body.error)
       assert.are.equal("Invalid grant_type", body.error_description)
     end)
 
@@ -662,7 +709,7 @@ describe("Authentication Plugin", function()
       local body = cjson.decode(response)
       assert.are.equal(200, status)
 
-      local consumer = dao_factory.consumers:find_by_keys({username = "auth_tests_consumer"})[1]
+      local consumer = dao_factory.consumers:find_all({username = "auth_tests_consumer"})[1]
 
       assert.are.equal(consumer.id, body.headers["x-consumer-id"])
       assert.are.equal(consumer.username, body.headers["x-consumer-username"])
@@ -677,40 +724,41 @@ describe("Authentication Plugin", function()
       local body = cjson.decode(response)
       assert.are.equal(401, status)
       assert.are.equal('Bearer realm="service"', headers['www-authenticate'])
-      assert.are.equal(0, utils.table_size(body))
+      assert.are.equal("invalid_request", body.error)
+      assert.are.equal("The access token is missing", body.error_description)
     end)
 
     it("should return 401 Unauthorized when an invalid access token is being sent via url parameter", function()
       local response, status, headers = http_client.get(STUB_GET_URL, { access_token = "invalid" }, {host = "oauth2.com"})
       local body = cjson.decode(response)
       assert.are.equal(401, status)
-      assert.are.equal('Bearer realm="service" error="invalid_token" error_description="The access token is invalid"', headers['www-authenticate'])
+      assert.are.equal('Bearer realm="service" error="invalid_token" error_description="The access token is invalid or has expired"', headers['www-authenticate'])
       assert.are.equal("invalid_token", body.error)
-      assert.are.equal("The access token is invalid", body.error_description)
+      assert.are.equal("The access token is invalid or has expired", body.error_description)
     end)
 
     it("should return 401 Unauthorized when an invalid access token is being sent via the Authorization header", function()
       local response, status, headers = http_client.post(STUB_POST_URL, { }, {host = "oauth2.com", authorization = "bearer invalid"})
       local body = cjson.decode(response)
       assert.are.equal(401, status)
-      assert.are.equal('Bearer realm="service" error="invalid_token" error_description="The access token is invalid"', headers['www-authenticate'])
+      assert.are.equal('Bearer realm="service" error="invalid_token" error_description="The access token is invalid or has expired"', headers['www-authenticate'])
       assert.are.equal("invalid_token", body.error)
-      assert.are.equal("The access token is invalid", body.error_description)
+      assert.are.equal("The access token is invalid or has expired", body.error_description)
     end)
 
     it("should return 401 Unauthorized when token has expired", function()
       local token = provision_token()
 
       -- Token expires in (5 seconds)
-      os.execute("sleep "..tonumber(6))
+      os.execute("sleep 7")
 
       local response, status, headers = http_client.post(STUB_POST_URL, { }, {host = "oauth2.com", authorization = "bearer "..token.access_token})
       local body = cjson.decode(response)
       assert.are.equal(401, status)
       assert.are.equal(2, utils.table_size(body))
-      assert.are.equal('Bearer realm="service" error="invalid_token" error_description="The access token expired"', headers['www-authenticate'])
+      assert.are.equal('Bearer realm="service" error="invalid_token" error_description="The access token is invalid or has expired"', headers['www-authenticate'])
       assert.are.equal("invalid_token", body.error)
-      assert.are.equal("The access token expired", body.error_description)
+      assert.are.equal("The access token is invalid or has expired", body.error_description)
     end)
   end)
 
@@ -742,16 +790,16 @@ describe("Authentication Plugin", function()
       local _, status = http_client.post(STUB_POST_URL, { }, {host = "oauth2.com", authorization = "bearer "..token.access_token})
       assert.are.equal(200, status)
 
-      local id = dao_factory.oauth2_tokens:find_by_keys({access_token = token.access_token })[1].id
-      assert.truthy(dao_factory.oauth2_tokens:find_by_primary_key({id=id}))
+      local id = dao_factory.oauth2_tokens:find_all({access_token = token.access_token })[1].id
+      assert.truthy(dao_factory.oauth2_tokens:find({id=id}))
 
       -- But waiting after the cache expiration (5 seconds) should block the request
-      os.execute("sleep "..tonumber(6))
+      os.execute("sleep 7")
 
       local response, status = http_client.post(STUB_POST_URL, { }, {host = "oauth2.com", authorization = "bearer "..token.access_token})
       local body = cjson.decode(response)
       assert.are.equal(401, status)
-      assert.are.equal("The access token expired", body.error_description)
+      assert.are.equal("The access token is invalid or has expired", body.error_description)
 
       -- Refreshing the token
       local response, status = http_client.post(PROXY_SSL_URL.."/oauth2/token", { refresh_token = token.refresh_token, client_id = "clientid123", client_secret = "secret123", grant_type = "refresh_token" }, {host = "oauth2.com"})
@@ -766,7 +814,7 @@ describe("Authentication Plugin", function()
       assert.falsy(token.access_token == body.access_token)
       assert.falsy(token.refresh_token == body.refresh_token)
 
-      assert.falsy(dao_factory.oauth2_tokens:find_by_primary_key({id=id}))
+      assert.falsy(dao_factory.oauth2_tokens:find({id=id}))
     end)
 
   end)

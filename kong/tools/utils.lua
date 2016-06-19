@@ -7,6 +7,8 @@
 
 local url = require "socket.url"
 local uuid = require "lua_uuid"
+local stringy = require "stringy"
+local ffi = require "ffi"
 
 local type = type
 local pairs = pairs
@@ -18,17 +20,33 @@ local table_insert = table.insert
 local string_find = string.find
 local string_format = string.format
 
-local _M = {}
+ffi.cdef[[
+int gethostname(char *name, size_t len);
+]]
 
+local _M = {}
 
 --- Retrieves the hostname of the local machine
 -- @return string  The hostname
 function _M.get_hostname()
-  local f = io.popen ("/bin/hostname")
-  local hostname = f:read("*a") or ""
-  f:close()
-  hostname = string.gsub(hostname, "\n$", "")
-  return hostname
+  local result
+  local C = ffi.C
+  local SIZE = 128
+
+  local buf = ffi.new("unsigned char[?]", SIZE)
+  local res = C.gethostname(buf, SIZE)
+
+  if res == 0 then
+    local hostname = ffi.string(buf, SIZE)
+    result = string.gsub(hostname, "%z+$", "")
+  else
+    local f = io.popen ("/bin/hostname")
+    local hostname = f:read("*a") or ""
+    f:close()
+    result = string.gsub(hostname, "\n$", "")
+  end
+
+  return result
 end
 
 
@@ -37,6 +55,9 @@ end
 function _M.random_string()
   return uuid():gsub("-", "")
 end
+
+_M.split = stringy.split
+_M.strip = stringy.strip
 
 --- URL escape and format key and value
 -- An obligatory url.unescape pass must be done to prevent double-encoding
@@ -88,7 +109,7 @@ function _M.encode_args(args, raw)
       value = tostring(value)
       if value ~= "" then
         query[#query+1] = encode_args_value(key, value, raw)
-      elseif raw then
+      elseif raw or value == "" then
         query[#query+1] = key
       end
     end
@@ -96,6 +117,35 @@ function _M.encode_args(args, raw)
 
   return table_concat(query, "&")
 end
+
+--- Checks whether a request is https or was originally https (but already terminated).
+-- It will check in the current request (global `ngx` table). If the header `X-Forwarded-Proto` exists 
+-- with value `https` then it will also be considered as an https connection. 
+-- @param allow_terminated if truthy, the `X-Forwarded-Proto` header will be checked as well. 
+-- @return boolean or nil+error in case the header exists multiple times
+_M.check_https = function(allow_terminated)
+  if ngx.var.scheme:lower() == "https" then
+    return true
+  end
+  
+  if not allow_terminated then
+    return false
+  end
+  
+  local forwarded_proto_header = ngx.req.get_headers()["x-forwarded-proto"]
+  if tostring(forwarded_proto_header):lower() == "https" then
+    return true
+  end
+  
+  if type(forwarded_proto_header) == "table" then
+    -- we could use the first entry (lower security), or check the contents of each of them (slow). So for now defensive, and error
+    -- out on multiple entries for the x-forwarded-proto header.
+    return nil, "Only one X-Forwarded-Proto header allowed"
+  end
+  
+  return false
+end
+
 
 --- Calculates a table size.
 -- All entries both in array and hash part.
@@ -170,7 +220,31 @@ function _M.deep_copy(orig)
   return copy
 end
 
+function _M.shallow_copy(orig)
+  local orig_type = type(orig)
+  local copy
+  if orig_type == "table" then
+    copy = {}
+    for orig_key, orig_value in pairs(orig) do
+      copy[orig_key] = orig_value
+    end
+  else -- number, string, boolean, etc
+    copy = orig
+  end
+  return copy
+end
+
 local err_list_mt = {}
+
+--- Concatenates lists into a new table.
+function _M.concat(...)
+  local result = {}
+  local insert = table.insert
+  for _, t in ipairs({...}) do
+    for _, v in ipairs(t) do insert(result, v) end
+  end
+  return result
+end
 
 --- Add an error message to a key/value table.
 -- If the key already exists, a sub table is created with the original and the new value.

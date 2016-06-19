@@ -26,11 +26,15 @@ describe("SSL Hooks", function()
     spec_helper.insert_fixtures {
       api = {
         { request_host = "ssl1.com", upstream_url = "http://mockbin.com" }
-      },
-      plugin = {
-        { name = "ssl", config = { cert = ssl_fixtures.cert, key = ssl_fixtures.key }, __api = 1 }
       }
     }
+
+    -- The SSL plugin needs to be added manually because we are requiring ngx.ssl
+    local _, status = http_client.post_multipart(API_URL.."/apis/ssl1.com/plugins/", { 
+      name = "ssl", 
+      ["config.cert"] = ssl_fixtures.cert, 
+      ["config.key"] = ssl_fixtures.key})
+    assert.equals(201, status)
   end)
 
   describe("SSL plugin entity invalidation", function()
@@ -44,7 +48,7 @@ describe("SSL Hooks", function()
       -- Check that cache is populated
       local response, status = http_client.get(API_URL.."/apis/", {request_host="ssl1.com"})
       assert.equals(200, status)
-      local api_id = table.remove(json.decode(response).data, 1).id
+      local api_id = json.decode(response).data[1].id
       assert.truthy(api_id)
 
       local cache_key = cache.ssl_data(api_id)
@@ -54,7 +58,7 @@ describe("SSL Hooks", function()
       -- Retrieve SSL plugin
       local response, status = http_client.get(API_URL.."/plugins/", {api_id=api_id, name="ssl"})
       assert.equals(200, status)
-      local plugin_id = table.remove(json.decode(response).data, 1).id
+      local plugin_id = json.decode(response).data[1].id
       assert.truthy(plugin_id)
 
       -- Delete SSL plugin (which triggers invalidation)
@@ -86,7 +90,7 @@ describe("SSL Hooks", function()
       -- Check that cache is populated
       local response, status = http_client.get(API_URL.."/apis/", {request_host="ssl1.com"})
       assert.equals(200, status)
-      local api_id = table.remove(json.decode(response).data, 1).id
+      local api_id = json.decode(response).data[1].id
       assert.truthy(api_id)
 
       local cache_key = cache.ssl_data(api_id)
@@ -96,7 +100,7 @@ describe("SSL Hooks", function()
       -- Retrieve SSL plugin
       local response, status = http_client.get(API_URL.."/plugins/", {api_id=api_id, name="ssl"})
       assert.equals(200, status)
-      local plugin_id = table.remove(json.decode(response).data, 1).id
+      local plugin_id = json.decode(response).data[1].id
       assert.truthy(plugin_id)
       
       -- Update SSL plugin (which triggers invalidation)
@@ -136,7 +140,7 @@ describe("SSL Hooks", function()
        -- Check that cache is populated
       local response, status = http_client.get(API_URL.."/apis/", {request_host="ssl1.com"})
       assert.equals(200, status)
-      local api_id = table.remove(json.decode(response).data, 1).id
+      local api_id = json.decode(response).data[1].id
       assert.truthy(api_id)
 
       local cache_key = cache.ssl_data(api_id)

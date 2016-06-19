@@ -81,9 +81,7 @@ local function check_request_path(request_path, api_t)
   end
 
   if request_path ~= nil and request_path ~= "" then
-    if request_path == "/" then
-      return false, "cannot be an empty path: '/'"
-    elseif sub(request_path, 1, 1) ~= "/" then
+    if sub(request_path, 1, 1) ~= "/" then
       return false, fmt("must be prefixed with slash: '%s'", request_path)
     elseif match(request_path, "//+") then
       -- Check for empty segments (/status//123)
@@ -95,7 +93,7 @@ local function check_request_path(request_path, api_t)
 
     -- From now on, the request_path is considered valid.
     -- Remove trailing slash
-    if sub(request_path, -1) == "/" then
+    if request_path ~= "/" and sub(request_path, -1) == "/" then
       api_t.request_path = sub(request_path, 1, -2)
     end
   end
@@ -148,16 +146,19 @@ local function check_name(name)
 end
 
 return {
-  name = "API",
+  table = "apis",
   primary_key = {"id"},
   fields = {
-    id = {type = "id", dao_insert_value = true},
-    created_at = {type = "timestamp", immutable = true, dao_insert_value = true},
-    name = {type = "string", unique = true, queryable = true, default = default_name, func = check_name},
-    request_host = {type = "string", unique = true, queryable = true, func = check_request_host},
+    id = {type = "id", dao_insert_value = true, required = true},
+    created_at = {type = "timestamp", immutable = true, dao_insert_value = true, required = true},
+    name = {type = "string", unique = true, default = default_name, func = check_name},
+    request_host = {type = "string", unique = true, func = check_request_host},
     request_path = {type = "string", unique = true, func = check_request_path},
-    strip_request_path = {type = "boolean"},
+    strip_request_path = {type = "boolean", default = false},
     upstream_url = {type = "url", required = true, func = validate_upstream_url_protocol},
-    preserve_host = {type = "boolean"}
-  }
+    preserve_host = {type = "boolean", default = false}
+  },
+  marshall_event = function(self, t)
+    return { id = t.id }
+  end
 }

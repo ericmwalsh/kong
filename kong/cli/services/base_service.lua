@@ -40,7 +40,7 @@ function BaseService.find_cmd(app_name, additional_paths, check_path_func)
     end
   elseif #found_file_paths > 0 then
     -- Just return the first path
-    return table.remove(found_file_paths, 1)
+    return found_file_paths[1]
   end
 
   return nil
@@ -68,11 +68,14 @@ function BaseService:is_running()
 end
 
 function BaseService:_get_cmd(additional_paths, check_path_func)
-  local cmd = BaseService.find_cmd(self._name, additional_paths, check_path_func)
-  if not cmd then
-    return nil, "Can't find "..self._name
+  if not self._cmd then -- Cache the command after the first time
+    local cmd = BaseService.find_cmd(self._name, additional_paths, check_path_func)
+    if not cmd then
+      return nil, "Can't find "..self._name
+    end
+    self._cmd = cmd
   end
-  return cmd
+  return self._cmd
 end
 
 function BaseService:start()

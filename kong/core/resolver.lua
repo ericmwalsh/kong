@@ -1,3 +1,4 @@
+local singletons = require "kong.singletons"
 local url = require "socket.url"
 local cache = require "kong.tools.database_cache"
 local stringy = require "stringy"
@@ -5,6 +6,7 @@ local constants = require "kong.constants"
 local responses = require "kong.tools.responses"
 
 local table_insert = table.insert
+local table_sort = table.sort
 local string_match = string.match
 local string_find = string.find
 local string_format = string.format
@@ -63,7 +65,7 @@ end
 -- Load all APIs in memory.
 -- Sort the data for faster lookup: dictionary per request_host and an array of wildcard request_host.
 function _M.load_apis_in_memory()
-  local apis, err = dao.apis:find_all()
+  local apis, err = singletons.dao.apis:find_all()
   if err then
     return nil, err
   end
@@ -91,6 +93,11 @@ function _M.load_apis_in_memory()
       })
     end
   end
+
+  -- Sort request_path_arr by descending specificity.
+  table_sort(request_path_arr, function (first, second)
+    return first.request_path > second.request_path
+  end)
 
   return {
     by_dns = dns_dic,
@@ -149,7 +156,7 @@ function _M.find_api_by_request_path(uri, request_path_arr)
   end
 
   for _, item in ipairs(request_path_arr) do
-    local m, err = ngx.re.match(uri, "^"..item.request_path.."/")
+    local m, err = ngx.re.match(uri, "^"..(item.request_path == "/" and "/" or item.request_path.."/"))
     if err then
       ngx.log(ngx.ERR, "[resolver] error matching requested request_path: "..err)
     elseif m then
@@ -200,6 +207,7 @@ local function find_api(uri, headers)
   api, matched_host, hosts_list = _M.find_api_by_request_host(headers, apis_dics)
   -- If it was found by Host, return
   if api then
+    ngx.req.set_header(constants.HEADERS.FORWARDED_HOST, matched_host)
     return nil, api, matched_host, hosts_list
   end
 
@@ -233,12 +241,13 @@ function _M.execute(request_uri, request_headers)
   -- If API was retrieved by request_path and the request_path needs to be stripped
   if strip_request_path_pattern and api.strip_request_path then
     uri = _M.strip_request_path(uri, strip_request_path_pattern, url_has_path(upstream_url))
+    ngx.req.set_header(constants.HEADERS.FORWARDED_PREFIX, api.request_path)
   end
 
   upstream_url = upstream_url..uri
 
   if api.preserve_host then
-    upstream_host = matched_host
+    upstream_host = matched_host or ngx.req.get_headers()["host"]
   end
 
   if upstream_host == nil then

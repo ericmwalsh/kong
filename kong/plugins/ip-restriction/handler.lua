@@ -23,12 +23,16 @@ function IpRestrictionHandler:access(conf)
   local block = false
   local remote_addr = ngx.var.remote_addr
 
-  if conf._blacklist_cache and #conf._blacklist_cache > 0 then
-    block = iputils.ip_in_cidrs(remote_addr, conf._blacklist_cache)
+  if not remote_addr then
+    return responses.send_HTTP_FORBIDDEN("Cannot identify the client IP address, unix domain sockets are not supported.")
   end
 
-  if conf._whitelist_cache and #conf._whitelist_cache > 0 then
-    block = not iputils.ip_in_cidrs(remote_addr, conf._whitelist_cache)
+  if conf.blacklist and #conf.blacklist > 0 then
+    block = iputils.ip_in_cidrs(remote_addr, iputils.parse_cidrs(conf.blacklist))
+  end
+
+  if conf.whitelist and #conf.whitelist > 0 then
+    block = not iputils.ip_in_cidrs(remote_addr, iputils.parse_cidrs(conf.whitelist))
   end
 
   if block then

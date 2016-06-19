@@ -87,9 +87,30 @@
   ## Key for encrypting network traffic within Kong. Must be a base64-encoded 16-byte key.
   # encrypt: "foo"
 
+  ######
+  ## The TTL (time to live), in seconds, of a node in the cluster when it stops sending healthcheck pings, maybe
+  ## because of a failure. If the node is not able to send a new healthcheck before the expiration, then new nodes
+  ## in the cluster will stop attempting to connect to it on startup. Should be at least 60.
+  # ttl_on_failure: 3600
+
 ######
-## Specify which database to use. Only "cassandra" is currently available.
+## Specify which database to use. Only "cassandra" and "postgres" are currently available.
 # database: cassandra
+
+######
+## PostgreSQL configuration
+# postgres:
+  # host: "127.0.0.1"
+  # port: 5432
+
+  ######
+  ## Name of the database used by Kong. Will be created if it does not exist.
+  # database: kong
+
+  #####
+  ## User authentication settings
+  # user: ""
+  # password: ""
 
 ######
 ## Cassandra configuration (keyspace, authentication, client-to-node encryption)
@@ -98,6 +119,10 @@
   ## Contact points to your Cassandra cluster.
   # contact_points:
   #   - "127.0.0.1:9042"
+
+  ## Port on which your cluster's peers (other than your contact_points)
+  ## are listening on.
+  # port: 9042
 
   ######
   ## Name of the keyspace used by Kong. Will be created if it does not exist.
@@ -126,6 +151,11 @@
   # data_centers:
   #   dc1: 2
   #   dc2: 3
+
+  #####
+  ## Consistency level to use.
+  ## See http://docs.datastax.com/en/cassandra/2.0/cassandra/dml/dml_config_consistency_c.html
+  # consistency: ONE
 
   #####
   ## Client-to-node TLS options.
@@ -164,7 +194,7 @@
 ## This file can tweaked to some extent, but many directives are necessary for Kong to work.
 ## /!\ BE CAREFUL
 nginx: |
-  user {{user}};
+  {{user}}
   worker_processes auto;
   error_log logs/error.log error;
   daemon on;
@@ -228,19 +258,23 @@ nginx: |
     lua_socket_log_errors off;
     {{lua_ssl_trusted_certificate}}
 
-    init_by_lua '
+    init_by_lua_block {
       kong = require "kong"
       kong.init()
-    ';
+    }
 
-    init_worker_by_lua 'kong.init_worker()';
+    init_worker_by_lua_block {
+      kong.init_worker()
+    }
 
     server {
       server_name _;
       listen {{proxy_listen}};
       listen {{proxy_listen_ssl}} ssl;
 
-      ssl_certificate_by_lua 'kong.ssl_certificate()';
+      ssl_certificate_by_lua_block {
+        kong.ssl_certificate()
+      }
 
       ssl_certificate {{ssl_cert}};
       ssl_certificate_key {{ssl_key}};
@@ -254,9 +288,10 @@ nginx: |
         set $upstream_url nil;
 
         # Authenticate the user and load the API info
-        access_by_lua 'kong.access()';
+        access_by_lua_block {
+          kong.access()
+        }
 
-        # Proxy the request
         # Proxy the request
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -266,26 +301,32 @@ nginx: |
         proxy_pass_header Server;
 
         # Add additional response headers
-        header_filter_by_lua 'kong.header_filter()';
+        header_filter_by_lua_block {
+          kong.header_filter()
+        }
 
         # Change the response body
-        body_filter_by_lua 'kong.body_filter()';
+        body_filter_by_lua_block {
+          kong.body_filter()
+        }
 
         # Log the request
-        log_by_lua 'kong.log()';
+        log_by_lua_block {
+          kong.log()
+        }
       }
 
       location /robots.txt {
         return 200 'User-agent: *\nDisallow: /';
       }
 
-      error_page 500 /500.html;
-      location = /500.html {
+      error_page 500 502 503 504 /50x;
+
+      location = /50x {
         internal;
-        content_by_lua '
-          local responses = require "kong.tools.responses"
-          responses.send_HTTP_INTERNAL_SERVER_ERROR("An unexpected error occurred")
-        ';
+        content_by_lua_block {
+          require("kong.core.error_handlers")(ngx)
+        }
       }
     }
 
@@ -297,7 +338,7 @@ nginx: |
 
       location / {
         default_type application/json;
-        content_by_lua '
+        content_by_lua_block {
           ngx.header["Access-Control-Allow-Origin"] = "*"
           if ngx.req.get_method() == "OPTIONS" then
             ngx.header["Access-Control-Allow-Methods"] = "GET,HEAD,PUT,PATCH,POST,DELETE"
@@ -305,8 +346,8 @@ nginx: |
             ngx.exit(204)
           end
           local lapis = require "lapis"
-          lapis.serve("kong.api.app")
-        ';
+          lapis.serve "kong.api.app"
+        }
       }
 
       location /nginx_status {

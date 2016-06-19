@@ -1,5 +1,141 @@
 ## [Unreleased][unreleased]
 
+## [0.8.3] - 2016/06/01
+
+This release includes some bugfixes:
+
+### Changed
+
+- Switched the log level of the "No nodes found in cluster" warning to `INFO`, that was printed when starting up the first Kong node in a new cluster.
+- Kong now requires OpenResty `1.9.7.5`.
+
+### Fixed
+
+- New nodes are now properly registered into the `nodes` table when running on the same machine. [#1281](https://github.com/Mashape/kong/pull/1281)
+- Fixed a failed error parsing on Postgres. [#1269](https://github.com/Mashape/kong/pull/1269)
+- Plugins:
+  - Response Transformer: Slashes are now encoded properly, and fixed a bug that hang the execution of the plugin. [#1257](https://github.com/Mashape/kong/pull/1257) and [#1263](https://github.com/Mashape/kong/pull/1263)
+  - JWT: If a value for `algorithm` is missing, it's now `HS256` by default. This problem occured when migrating from older versions of Kong.
+  - OAuth 2.0: Fixed a Postgres problem that was preventing an application from being created, and fixed a check on the `redirect_uri` field. [#1264](https://github.com/Mashape/kong/pull/1264) and [#1267](https://github.com/Mashape/kong/issues/1267)
+
+## [0.8.2] - 2016/05/25
+
+This release includes bugfixes and minor updates:
+
+### Added
+
+- Support for a simple slash in `request_path`. [#1227](https://github.com/Mashape/kong/pull/1227)
+- Plugins:
+  - Response Rate Limiting: it now appends usage headers to the upstream requests in the form of `X-Ratelimit-Remaining-{limit_name}` and introduces a new `config.block_on_first_violation` property. [#1235](https://github.com/Mashape/kong/pull/1235)
+
+#### Changed
+
+- Plugins:
+  - **Mashape Analytics: The plugin is now called "Galileo", and added support for Galileo v3. [#1159](https://github.com/Mashape/kong/pull/1159)**
+
+#### Fixed
+
+- Postgres now relies on the `search_path` configured on the database and its default value `$user, public`. [#1196](https://github.com/Mashape/kong/issues/1196)
+- Kong now properly encodes an empty querystring parameter like `?param=` when proxying the request. [#1210](https://github.com/Mashape/kong/pull/1210)
+- The configuration now checks that `cluster.ttl_on_failure` is at least 60 seconds. [#1199](https://github.com/Mashape/kong/pull/1199)
+- Plugins:
+  - Loggly: Fixed an issue that was triggering 400 and 500 errors. [#1184](https://github.com/Mashape/kong/pull/1184)
+  - JWT: The `TYP` value in the header is not optional and case-insensitive. [#1192](https://github.com/Mashape/kong/pull/1192)
+  - Request Transformer: Fixed a bug when transforming request headers. [#1202](https://github.com/Mashape/kong/pull/1202)
+  - OAuth 2.0: Multiple redirect URIs are now supported. [#1112](https://github.com/Mashape/kong/pull/1112)
+  - IP Restriction: Fixed that prevented the plugin for working properly when added on an API. [#1245](https://github.com/Mashape/kong/pull/1245)
+  - CORS: Fixed an issue when `config.preflight_continue` was enabled. [#1240](https://github.com/Mashape/kong/pull/1240)
+
+## [0.8.1] - 2016/04/27
+
+This release includes some fixes and minor updates:
+
+### Added
+
+- Adds `X-Forwarded-Host` and `X-Forwarded-Prefix` to the upstream request headers. [#1180](https://github.com/Mashape/kong/pull/1180)
+- Plugins:
+  - Datadog: Added two new metrics, `unique_users` and `request_per_user`, that log the consumer information. [#1179](https://github.com/Mashape/kong/pull/1179)
+
+### Fixed
+
+- Fixed a DAO bug that affected full entity updates. [#1163](https://github.com/Mashape/kong/pull/1163)
+- Fixed a bug when setting the authentication provider in Cassandra.
+- Updated the Cassandra driver to v0.5.2.
+- Properly enforcing required fields in PUT requests. [#1177](https://github.com/Mashape/kong/pull/1177)
+- Fixed a bug that prevented to retrieve the hostname of the local machine on certain systems. [#1178](https://github.com/Mashape/kong/pull/1178)
+
+## [0.8.0] - 2016/04/18
+
+This release includes support for PostgreSQL as Kong's primary datastore!
+
+### Breaking changes
+
+- Remove support for the long deprecated `/consumers/:consumer/keyauth/` and `/consumers/:consumer/basicauth/` routes (deprecated in `0.5.0`). The new routes (available since `0.5.0` too) use the real name of the plugin: `/consumers/:consumer/key-auth` and `/consumers/:consumer/basic-auth`.
+
+### Added
+
+- Support for PostgreSQL 9.4+ as Kong's primary datastore. [#331](https://github.com/Mashape/kong/issues/331) [#1054](https://github.com/Mashape/kong/issues/1054)
+- Configurable Cassandra reading/writing consistency. [#1026](https://github.com/Mashape/kong/pull/1026)
+- Admin API: including pending and running timers count in the response to `/`. [#992](https://github.com/Mashape/kong/pull/992)
+- Plugins
+  - **New correlation-id plugin**: assign unique identifiers to the requests processed by Kong. Courtesy of [@opyate](https://github.com/opyate). [#1094](https://github.com/Mashape/kong/pull/1094)
+  - LDAP: add support for LDAP authentication. [#1133](https://github.com/Mashape/kong/pull/1133)
+  - StatsD: add support for StatsD logging. [#1142](https://github.com/Mashape/kong/pull/1142)
+  - JWT: add support for RS256 signed tokens thanks to [@kdstew](https://github.com/kdstew)! [#1053](https://github.com/Mashape/kong/pull/1053)
+  - ACL: appends `X-Consumer-Groups` to the request, so the upstream service can check what groups the consumer belongs to. [#1154](https://github.com/Mashape/kong/pull/1154)
+  - Galileo (mashape-analytics): increase batch sending timeout to 30s. [#1091](https://github.com/Mashape/kong/pull/1091)
+- Added `ttl_on_failure` option in the cluster configuration, to configure the TTL of failed nodes. [#1125](https://github.com/Mashape/kong/pull/1125)
+
+### Fixed
+
+- Introduce a new `port` option when connecting to your Cassandra cluster instead of using the CQL default (9042). [#1139](https://github.com/Mashape/kong/issues/1139)
+- Plugins
+  - Request/Response Transformer: add missing migrations for upgrades from ` <= 0.5.x`. [#1064](https://github.com/Mashape/kong/issues/1064)
+  - OAuth2
+    - Error responses comply to RFC 6749. [#1017](https://github.com/Mashape/kong/issues/1017)
+    - Handle multipart requests. [#1067](https://github.com/Mashape/kong/issues/1067)
+    - Make access_tokens correctly expire. [#1089](https://github.com/Mashape/kong/issues/1089)
+
+> **internal**
+> - replace globals with singleton pattern thanks to [@mars](https://github.com/mars).
+> - fixed resolution mismatches when using deep paths in the path resolver thanks to [siddharthkchatterjee](https://github.com/siddharthkchatterjee)
+
+## [0.7.0] - 2016/02/24
+
+### Breaking changes
+
+Due to the NGINX security fixes (CVE-2016-0742, CVE-2016-0746, CVE-2016-0747), OpenResty was bumped to `1.9.7.3` which is not backwards compatible, and thus requires changes to be made to the `nginx` property of Kong's configuration file. See the [0.7 upgrade path](https://github.com/Mashape/kong/blob/master/UPGRADE.md#upgrade-to-07x) for instructions.
+
+However by upgrading the underlying OpenResty version, source installations do not have to patch the NGINX core and use the old `ssl-cert-by-lua` branch of ngx_lua anymore. This will make source installations much easier.
+
+### Added
+
+- Support for OpenResty `1.9.7.*`. This includes NGINX security fixes (CVE-2016-0742, CVE-2016-0746, CVE-2016-0747). [#906](https://github.com/Mashape/kong/pull/906)
+- Plugins
+  - **New Runscope plugin**: Monitor your APIs from Kong with Runscope. Courtesy of [@mansilladev](https://github.com/mansilladev). [#924](https://github.com/Mashape/kong/pull/924)
+  - Datadog: New `response.size` metric. [#923](https://github.com/Mashape/kong/pull/923)
+  - Rate-Limiting and Response Rate-Limiting
+    - New `config.async` option to asynchronously increment counters to reduce latency at the cost of slighly reducing the accuracy. [#912](https://github.com/Mashape/kong/pull/912)
+    - New `config.continue_on_error` option to keep proxying requests in case the datastore is unreachable. rate-limiting operations will be disabled until the datastore is responsive again. [#953](https://github.com/Mashape/kong/pull/953)
+- CLI
+  - Perform a simple permission check on the NGINX working directory when starting, to prevent errors during execution. [#939](https://github.com/Mashape/kong/pull/939)
+- Send 50x errors with the appropriate format. [#927](https://github.com/Mashape/kong/pull/927) [#970](https://github.com/Mashape/kong/pull/970)
+
+### Fixed
+
+- Plugins
+  - OAuth2
+    - Better handling of `redirect_uri` (prevent the use of fragments and correctly handle querystrings). Courtesy of [@PGBI](https://github.com/PGBI). [#930](https://github.com/Mashape/kong/pull/930)
+    - Add `PUT` support to the `/auth2_tokens` route. [#897](https://github.com/Mashape/kong/pull/897)
+    - Better error message when the `access_token` is missing. [#1003](https://github.com/Mashape/kong/pull/1003)
+  - IP restriction: Fix an issue that could arise when restarting Kong. Now Kong does not need to be restarted for the ip-restriction configuration to take effect. [#782](https://github.com/Mashape/kong/pull/782) [#960](https://github.com/Mashape/kong/pull/960)
+  - ACL: Properly invalidating entities when assigning a new ACL group. [#996](https://github.com/Mashape/kong/pull/996)
+  - SSL: Replace shelled out openssl calls with native `ngx.ssl` conversion utilities, which preserve the certificate chain. [#968](https://github.com/Mashape/kong/pull/968)
+- Avoid user warning on start when the user is not root. [#964](https://github.com/Mashape/kong/pull/964)
+- Store Serf logs in NGINX working directory to prevent eventual permission issues. [#975](https://github.com/Mashape/kong/pull/975)
+- Allow plugins configured on a Consumer *without* being configured on an API to run. [#978](https://github.com/Mashape/kong/issues/978) [#980](https://github.com/Mashape/kong/pull/980)
+- Fixed an edge-case where Kong nodes would not be registered in the `nodes` table. [#1008](https://github.com/Mashape/kong/pull/1008)
+
 ## [0.6.1] - 2016/02/03
 
 This release contains tiny bug fixes that were especially annoying for complex Cassandra setups and power users of the Admin API!
@@ -57,7 +193,7 @@ Other additions include:
   - OAuth2
     - Add support for `X-Forwarded-Proto` header. [#650](https://github.com/Mashape/kong/pull/650)
     - Expose a new `/oauth2_tokens` endpoint with the possibility to retrieve, update or delete OAuth 2.0 access tokens. [#729](https://github.com/Mashape/kong/pull/729)
-  - JWT:
+  - JWT
     - Support for base64 encoded secrets. [#838](https://github.com/Mashape/kong/pull/838) [#577](https://github.com/Mashape/kong/issues/577)
     - Support to configure the claim in which the key is given into the token (not `iss` only anymore). [#838](https://github.com/Mashape/kong/pull/838)
   - Request transformer
@@ -89,7 +225,7 @@ Other additions include:
   - In the responses, the `next` link is not being displayed anymore if there are no more entities to be returned. [#635](https://github.com/Mashape/kong/pull/635)
   - Prevent the update of `created_at` fields. [#820](https://github.com/Mashape/kong/pull/820)
   - Better `request_path` validation for APIs. "/" is not considered a valid path anymore. [#881](https://github.com/Mashape/kong/pull/881)
-- Plugins:
+- Plugins
   - Galileo: ensure the `mimeType` value is always a string in ALFs. [#584](https://github.com/Mashape/kong/issues/584)
   - JWT: allow to update JWT credentials using the PATCH method. It previously used to reply with `405 Method not allowed` because the PATCH method was not implemented. [#667](https://github.com/Mashape/kong/pull/667)
   - Rate limiting: fix a warning when many periods are configured. [#681](https://github.com/Mashape/kong/issues/681)
@@ -471,7 +607,12 @@ First version running with Cassandra.
 - CLI `bin/kong` script.
 - Database migrations (using `db.lua`).
 
-[unreleased]: https://github.com/mashape/kong/compare/0.6.1...next
+[unreleased]: https://github.com/mashape/kong/compare/0.8.3...next
+[0.8.3]: https://github.com/mashape/kong/compare/0.8.2...0.8.3
+[0.8.2]: https://github.com/mashape/kong/compare/0.8.1...0.8.2
+[0.8.1]: https://github.com/mashape/kong/compare/0.8.0...0.8.1
+[0.8.0]: https://github.com/mashape/kong/compare/0.7.0...0.8.0
+[0.7.0]: https://github.com/mashape/kong/compare/0.6.1...0.7.0
 [0.6.1]: https://github.com/mashape/kong/compare/0.6.0...0.6.1
 [0.6.0]: https://github.com/mashape/kong/compare/0.5.4...0.6.0
 [0.5.4]: https://github.com/mashape/kong/compare/0.5.3...0.5.4
